@@ -224,11 +224,15 @@ jobs:
           echo "Records produced:"
           ls -la build_records/ 2>/dev/null || echo "(no records)"
 
+      # Temporary per-app artifact: GitHub Actions cannot append to a shared
+      # artifact from parallel matrix jobs, so these are merged into a single
+      # zipped artifact by the package-apks job below.
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: apk-${{ matrix.app_name }}-${{ matrix.source }}
           path: "*.apk"
+          retention-days: 1
 
       - name: Upload Build Records
         if: always()
@@ -238,9 +242,47 @@ jobs:
           path: build_records/
           if-no-files-found: ignore
 
+  package-apks:
+    name: Package APKs
+    needs: [check-updates, build-apps]
+    runs-on: ubuntu-latest
+    if: always() && needs.check-updates.outputs.has_updates == 'true'
+
+    steps:
+      - name: Download All APK Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./all-apks
+          pattern: apk-*
+        continue-on-error: true
+
+      - name: Zip APKs
+        id: zip-apks
+        run: |
+          mkdir -p ./dist
+          mapfile -t apks < <(find ./all-apks -type f -name "*.apk" 2>/dev/null | sort)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "❌ No APKs to package"
+            echo "has_apks=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "📦 Zipping ${#apks[@]} APK(s)..."
+          # -j flattens the per-artifact directories; APK filenames are unique.
+          zip -j ./dist/morphe-apks.zip "${apks[@]}"
+          unzip -l ./dist/morphe-apks.zip
+          echo "has_apks=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Zipped APKs
+        if: steps.zip-apks.outputs.has_apks == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: morphe-apks
+          path: ./dist/morphe-apks.zip
+          if-no-files-found: error
+
   create-single-release:
     name: Create Single Release
-    needs: [check-updates, build-apps]
+    needs: [check-updates, build-apps, package-apks]
     runs-on: ubuntu-latest
     if: always() && needs.check-updates.outputs.has_updates == 'true'
     permissions:
@@ -257,11 +299,12 @@ jobs:
           path: ./build-plan
         continue-on-error: true
 
-      - name: Download All APK Artifacts
+      - name: Download Zipped APK Artifact
         uses: actions/download-artifact@v4
         with:
-          path: ./all-apks
-          pattern: apk-*
+          name: morphe-apks
+          path: ./apk-bundle
+        continue-on-error: true
 
       - name: Download All Build Records
         uses: actions/download-artifact@v4
@@ -273,7 +316,11 @@ jobs:
       - name: Check if Any APKs Were Built
         id: check-apks
         run: |
-          built_count=$(find ./all-apks -name "*.apk" 2>/dev/null | wc -l)
+          zip_file=$(find ./apk-bundle -maxdepth 1 -name "*.zip" 2>/dev/null | head -n1)
+          built_count=0
+          if [ -n "$zip_file" ]; then
+            built_count=$(unzip -l "$zip_file" | grep -c '\.apk$' || true)
+          fi
           echo "Built APKs: $built_count"
 
           if [ "$built_count" -eq 0 ]; then
@@ -283,13 +330,16 @@ jobs:
             echo "✅ $built_count rebuilt APK(s) ready for release"
             echo "skip_release=false" >> $GITHUB_OUTPUT
           fi
-      
-      - name: Collect All APKs
+
+      - name: Extract APK Bundle
         if: steps.check-apks.outputs.skip_release == 'false'
         run: |
           mkdir -p ./release-apks
-          echo "📦 Collecting rebuilt APKs..."
-          find ./all-apks -name "*.apk" -exec cp -f {} ./release-apks/ \; 2>/dev/null || true
+          echo "📦 Extracting zipped APKs..."
+          for zip_file in ./apk-bundle/*.zip; do
+            [ -e "$zip_file" ] || continue
+            unzip -o "$zip_file" -d ./release-apks
+          done
 
           echo "📁 APKs ready for release:"
           ls -la ./release-apks/
@@ -388,7 +438,7 @@ jobs:
 
   cleanup:
     name: Cleanup Workflow Runs
-    needs: [build-apps, create-single-release]
+    needs: [build-apps, package-apks, create-single-release]
     runs-on: ubuntu-latest
     if: always()
     permissions:
