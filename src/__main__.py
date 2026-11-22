@@ -424,8 +424,8 @@ def run_build(app_name: str, source: str, arch: str = "universal") -> str:
             utils.run_process([
                 str(apksigner), "sign", "--verbose",
                 "--ks", "keystore/public.jks",
-                "--ks-pass", "pass:public",
-                "--key-pass", "pass:public",
+                "--ks-pass", str("pass:" + getenv("KEYSTORE_PASSWORD")),
+                "--key-pass", str("pass:" + getenv("KEYSTORE_PASSWORD")),
                 "--ks-key-alias", "public",
                 "--in", str(output_apk), "--out", str(signed_apk)
             ], capture=True, stream=True)
