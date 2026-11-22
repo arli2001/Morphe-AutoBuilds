@@ -1,5 +1,4 @@
-{
-  "patch_list": [
+[
     {
       "app_name": "reddit",
       "source": "adobo",
@@ -95,5 +94,4 @@
       "source": "piko-dev",
       "arches": ["arm64-v8a"]
     }
-  ]
-}
+]
