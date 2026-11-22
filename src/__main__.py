@@ -426,7 +426,7 @@ def run_build(app_name: str, source: str, arch: str = "universal") -> str:
                 "--ks", "keystore/public.jks",
                 "--ks-pass", str("pass:" + getenv("KEYSTORE_PASSWORD")),
                 "--key-pass", str("pass:" + getenv("KEYSTORE_PASSWORD")),
-                "--ks-key-alias", "public",
+                "--ks-key-alias", "morphe",
                 "--in", str(output_apk), "--out", str(signed_apk)
             ], capture=True, stream=True)
         except Exception as e:
