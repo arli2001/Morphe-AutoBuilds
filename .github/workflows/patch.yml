@@ -273,12 +273,28 @@ jobs:
           echo "has_apks=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload Zipped APKs
+        id: upload-apks
         if: steps.zip-apks.outputs.has_apks == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: morphe-apks
           path: ./dist/morphe-apks.zip
           if-no-files-found: error
+
+      - name: Send Telegram Notification
+        if: steps.zip-apks.outputs.has_apks == 'true'
+        uses: appleboy/telegram-action@v1
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            📦 Morphe APKs built successfully
+
+            Repository: ${{ github.repository }}
+            Workflow: ${{ github.workflow }}
+
+            Download ZIP: ${{ steps.upload-apks.outputs.artifact-url }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
   create-single-release:
     name: Create Single Release
